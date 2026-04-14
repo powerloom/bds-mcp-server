@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bds-mcp-server"
+version = "0.1.0"
+description = "Hosted MCP server (SSE/HTTP) for BDS catalog tools, verification, and credit balance"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "mcp>=1.0",
+  "httpx>=0.27",
+  "pydantic-settings>=2.0",
+  "uvicorn[standard]>=0.30",
+  "starlette>=0.37",
+  "eth-abi>=5.0",
+  "eth-utils>=5.0",
+  "eth-hash[pycryptodome]>=0.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "ruff>=0.9.0"]
+
+[project.scripts]
+bds-mcp-server = "bds_mcp_server.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bds_mcp_server"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/bds_mcp_server", "README.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
