@@ -9,8 +9,9 @@ from mcp.server.lowlevel.server import request_ctx
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
+from starlette.types import Receive, Scope, Send
 
 from bds_mcp_server.auth import AuthError, MeteringAuthCache, extract_bearer, json_auth_error
 from bds_mcp_server.catalog_loader import CatalogLoadError, apply_catalog_filter, load_catalog_sync
@@ -22,6 +23,51 @@ from bds_mcp_server.tools.credit_tool import get_credit_balance
 from bds_mcp_server.tools.verify_tool import verify_data_provenance
 
 logger = logging.getLogger(__name__)
+
+
+class SseMcpSession:
+    """
+    Raw ASGI handler for ``GET /sse``.
+
+    Starlette's ``Route`` wraps plain *functions* as ``request_response(func)``, which only
+    passes ``Request`` — incompatible with ``SseServerTransport.connect_sse(scope, receive, send)``.
+    A **callable instance** is treated as ASGI and receives ``(scope, receive, send)``.
+    """
+
+    def __init__(
+        self,
+        sse: SseServerTransport,
+        mcp_server: Server,
+        auth_cache: MeteringAuthCache,
+    ) -> None:
+        self._sse = sse
+        self._mcp_server = mcp_server
+        self._auth_cache = auth_cache
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            return
+        request = Request(scope, receive)
+        key = extract_bearer(request)
+        if not key:
+            resp = JSONResponse(
+                {"error": "Missing Authorization: Bearer <api_key>"},
+                status_code=401,
+            )
+            await resp(scope, receive, send)
+            return
+        try:
+            await self._auth_cache.validate(key)
+        except AuthError as e:
+            await json_auth_error(e)(scope, receive, send)
+            return
+        async with self._sse.connect_sse(scope, receive, send) as streams:
+            await self._mcp_server.run(
+                streams[0],
+                streams[1],
+                self._mcp_server.create_initialization_options(),
+                raise_exceptions=False,
+            )
 
 
 def _api_key_from_context() -> str | None:
@@ -215,28 +261,6 @@ def create_starlette_app(settings: Settings) -> Starlette:
     async def health(_: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "service": "bds-mcp-server"})
 
-    async def handle_sse(scope: object, receive: object, send: object) -> Response:
-        request = Request(scope, receive)  # type: ignore[arg-type]
-        key = extract_bearer(request)
-        if not key:
-            return JSONResponse(
-                {"error": "Missing Authorization: Bearer <api_key>"},
-                status_code=401,
-            )
-        try:
-            await auth_cache.validate(key)
-        except AuthError as e:
-            return json_auth_error(e)
-
-        async with sse.connect_sse(scope, receive, send) as streams:  # type: ignore[arg-type]
-            await mcp_server.run(
-                streams[0],
-                streams[1],
-                mcp_server.create_initialization_options(),
-                raise_exceptions=False,
-            )
-        return Response()
-
     async def handle_post_message(scope: object, receive: object, send: object) -> None:
         request = Request(scope, receive)  # type: ignore[arg-type]
         key = extract_bearer(request)
@@ -256,7 +280,7 @@ def create_starlette_app(settings: Settings) -> Starlette:
 
     routes: list[Route | Mount] = [
         Route("/health", health, methods=["GET"]),
-        Route("/sse", handle_sse, methods=["GET"]),
+        Route("/sse", SseMcpSession(sse, mcp_server, auth_cache), methods=["GET"]),
         Mount("/messages/", app=handle_post_message),
     ]
     return Starlette(routes=routes)

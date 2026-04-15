@@ -56,7 +56,7 @@ Run commands via `uv run …` (see [Run](#run)). To put `bds-mcp-server` on your
 uv tool install .
 ```
 
-If the installed tool looks stale after local changes, `uv cache clean` then `uv tool install --force .`. Editable install while developing: `uv tool install --force --editable .`.
+After `git pull` or code changes, if **`uv tool install --force .`** still runs old code, run **`uv cache clean`** first, then **`uv tool install --force .`** again (uv may reuse wheels when the version string is unchanged). Editable: **`uv tool install --force --editable .`**.
 
 With pip only:
 
@@ -72,17 +72,21 @@ All settings use the **`BDS_MCP_`** prefix. Copy **`.env.example`** to **`.env`*
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `BDS_MCP_BASE_URL` | **yes** | — | Core API origin (no trailing path; e.g. `https://snapshotter.example`) |
+| `BDS_MCP_BASE_URL` | **yes** | — | **Upstream** Core API origin (same role as **`BDS_BASE_URL`** for `bds-agent`): catalog tools call `GET` here. **Not** the URL of this MCP server. |
 | `BDS_MCP_METERING_URL` | **yes** | — | Metering origin; server calls `GET {origin}/credits/balance` |
 | `BDS_MCP_CATALOG_PATH` **or** `BDS_MCP_CATALOG_URL` | **yes** (one of) | — | Local filesystem path to `endpoints.json`, or HTTP URL to fetch at startup |
-| `BDS_MCP_HOST` | no | `0.0.0.0` | Bind address |
-| `BDS_MCP_PORT` | no | `8808` | Listen port |
+| `BDS_MCP_HOST` | no | `0.0.0.0` | Bind address for **this** MCP server |
+| `BDS_MCP_PORT` | no | `8808` | Listen port (`/sse`, `/messages/`, `/health`) |
 | `BDS_MCP_CATALOG_PATH_PREFIXES` | no | `/mpp` | Comma-separated path prefixes to **filter** catalog routes; use `all` to disable filtering |
 | `BDS_MCP_POWERLOOM_RPC_URL` | no | — | JSON-RPC URL for **`verify_data_provenance`** (`eth_call`) |
 | `BDS_MCP_PROTOCOL_STATE_ADDRESS` | no | mainnet BDS default | ProtocolState contract |
 | `BDS_MCP_DATA_MARKET_ADDRESS` | no | mainnet BDS default | DataMarket contract |
 | `BDS_MCP_AUTH_CACHE_TTL_SECONDS` | no | `60` | Cache successful metering checks (seconds) |
 | `BDS_MCP_INTERNAL_BILLING_SECRET` | no | — | Reserved for future internal billing; not used in Phase 1 |
+
+Clients reach **this** MCP server at **`http(s)://<your-host>:<port>`** (or your reverse proxy). That host is **not** `BDS_MCP_BASE_URL` (upstream Core API).
+
+**Reference catalog:** BDS Mainnet Uniswap V3 [`endpoints.json`](https://raw.githubusercontent.com/powerloom/snapshotter-computes/refs/heads/bds_eth_uniswapv3_core/api/endpoints.json) in **snapshotter-computes** — mostly **`/mpp/...` GET** routes; a single **`"sse": true`** entry (**`/mpp/stream/allTrades`**) for the live trade stream. Use that URL as **`BDS_MCP_CATALOG_URL`** or copy the file locally for **`BDS_MCP_CATALOG_PATH`**.
 
 **Catalog filter:** Only routes whose `path` equals or starts with a listed prefix (after normalization) become MCP tools. If filtering removes every route, the server **refuses to start**.
 
@@ -144,7 +148,7 @@ This server uses the MCP Python SDK **SSE transport** (see `mcp.server.sse.SseSe
 
 ### Catalog tools (dynamic)
 
-One MCP tool per filtered **`endpoints.json`** route, same naming as local MCP: names typically start with **`bds_`**, derived from path and method. **GET** snapshot routes return JSON via the vendored HTTP client; **SSE** routes collect up to **`max_events`** (default **5**, max **50**) and return `events` plus last known credit header.
+One MCP tool per filtered **`endpoints.json`** route, same naming as local MCP: names typically start with **`bds_`**, derived from path and method. Most routes are **GET** snapshots against the Core API; only entries with **`"sse": true`** in the catalog use **SSE** upstream (in the [reference file](https://raw.githubusercontent.com/powerloom/snapshotter-computes/refs/heads/bds_eth_uniswapv3_core/api/endpoints.json) that is **`/mpp/stream/allTrades`** only)—those MCP tools collect up to **`max_events`** (default **5**, max **50**) and return `events` plus last known credit header.
 
 ### `verify_data_provenance` (fixed)
 
@@ -159,16 +163,43 @@ No parameters. Calls metering **`GET /credits/balance`** with the client’s Bea
 
 ## Connect from MCP clients
 
-Exact config depends on the client; common fields are:
+**`bds-agent` is not this client.** The CLI’s **`bds-agent mcp`** command runs a **stdio** MCP server and talks to the Core API itself. **`bds-mcp-server`** is a **separate process** that listens on HTTP; any **MCP client** that supports **SSE** (or your wrapper) connects to **`/sse`** and sends the same Bearer token your agent would use against the Core API.
 
-- **SSE URL:** `https://<your-host>:<port>/sse` (or behind TLS termination / reverse proxy).
-- **API key:** Your Powerloom API key as **`Authorization: Bearer`**.
+**What you need:** the **Powerloom API key** (the same one you use for `bds-agent` / `Authorization: Bearer` against the snapshotter). Put it in the **MCP client’s** config as `Authorization: Bearer <key>` on **both** the SSE GET and the message POSTs.
 
-**Claude Desktop / Cursor:** If the product supports **remote MCP over SSE**, add a server entry pointing at **`/sse`** and configure headers for the Bearer token (check the client’s current docs for “remote MCP” or “SSE”).
+### Claude Code
 
-**LangGraph / OpenClaw / CrewAI:** Use their MCP adapter with the SSE endpoint URL and the same Bearer header model as in [MCP SSE transport docs](https://github.com/modelcontextprotocol/python-sdk) (transport-specific).
+Remote MCP is supported; use **`--transport sse`** and **`--header`** for the Bearer token (options must come **before** the server name). Example for a server on localhost:
 
-**Custom clients:** Implement the MCP client flow: `GET /sse` with Bearer → read SSE `endpoint` → `POST` JSON-RPC to the advertised path with the same Bearer.
+```bash
+claude mcp add --transport sse \
+  --header "Authorization: Bearer YOUR_POWERLOOM_API_KEY" \
+  bds-mcp-local \
+  http://127.0.0.1:8808/sse
+```
+
+See Anthropic’s **[Claude Code MCP docs](https://docs.claude.com/en/docs/claude-code/mcp)** for `--scope`, JSON config, and `headersHelper` if you prefer not to paste the key on the command line. Their docs also show **streamable HTTP** transport; this server only implements **SSE** today.
+
+### Claude Desktop / Cursor
+
+If the product supports **remote MCP over SSE**, add a server entry for **`https://<host>:<port>/sse`** and set the **Authorization** header to **`Bearer <key>`** (exact UI varies by version).
+
+### LangGraph / OpenClaw / CrewAI
+
+Use their MCP adapter with the SSE URL and the same Bearer on all requests to this server.
+
+### Quick test (no Claude)
+
+**`scripts/list_mcp_tools.py`** connects to this server’s **`/sse`** using the MCP client’s **HTTP SSE transport** (how Claude/Cursor talk to *this* process). It lists **all** MCP tools—including mostly **GET** catalog tools and any **BDS stream** tool your catalog defines—not “SSE-only” upstream routes.
+
+```bash
+cd /path/to/bds-mcp-server
+uv sync --extra dev
+export BDS_MCP_SSE_API_KEY=your_key
+uv run python scripts/list_mcp_tools.py
+```
+
+You should see one line per tool name (catalog tools + `verify_data_provenance` + `get_credit_balance`). **`curl http://127.0.0.1:8808/health`** checks the process only; **`GET /sse`** needs a valid Bearer and is easier to verify with this script than raw curl.
 
 ---
 
