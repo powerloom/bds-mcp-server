@@ -66,8 +66,15 @@ class MeteringAuthCache:
 
         headers = {"Authorization": f"Bearer {api_key}"}
         timeout = httpx.Timeout(30.0, connect=10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(self._balance_url(), headers=headers)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                r = await client.get(self._balance_url(), headers=headers)
+        except httpx.RequestError as e:
+            raise AuthError(
+                f"Cannot reach metering service at {self._base!r} ({e!s}). "
+                "Check BDS_MCP_METERING_URL: host must resolve and be reachable from this server.",
+                status_code=502,
+            ) from e
 
         if r.status_code == 401:
             raise AuthError("Invalid or expired API key.", status_code=401)

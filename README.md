@@ -222,6 +222,7 @@ Ensure `.env` sets **`BDS_MCP_BASE_URL`**, **`BDS_MCP_METERING_URL`**, and **`BD
 |--------|----------------|
 | Process exits at startup | Catalog load failed (bad path/URL), or **no endpoints** after path-prefix filter — fix env and catalog |
 | **401** on `/sse` or `/messages/` | Missing/wrong **`Authorization: Bearer`**, or metering rejects the key |
+| **502** (or older builds: **500**) on `/sse` / POST during auth | Metering **`GET /credits/balance`** failed (timeout, TLS, or **`Name or service not known`**). **`BDS_MCP_METERING_URL`** must be a hostname the **MCP container/VM** can resolve (public URL or correct cluster DNS)—not a name that only resolves on a developer machine. Current server code returns **502** with a JSON error body instead of an unhandled **500**. |
 | **402** or “balance zero” | Add credits in metering; key is valid but not billable |
 | **`verify_data_provenance` errors** | Set **`BDS_MCP_POWERLOOM_RPC_URL`**; verify ProtocolState/DataMarket addresses match the chain |
 | Catalog tools return HTTP errors from core | **`BDS_MCP_BASE_URL`** wrong, or key lacks access; check Core API logs |
