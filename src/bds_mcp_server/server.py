@@ -86,7 +86,8 @@ def _verify_tool_definition() -> types.Tool:
         name=TOOL_VERIFY_DATA_PROVENANCE,
         description=(
             "Verify that a BDS response's CID matches the on-chain finalized CID via "
-            "ProtocolState.maxSnapshotsCid (Powerloom)."
+            "ProtocolState.maxSnapshotsCid (Powerloom). Uses server-side JSON-RPC only; "
+            "configured RPC is never included in the response."
         ),
         inputSchema={
             "type": "object",
@@ -211,10 +212,7 @@ async def _run_verify_tool(settings: Settings, arguments: dict[str, Any]) -> dic
     if not rpc or not str(rpc).strip():
         return {
             "verified": False,
-            "error": (
-                "Powerloom JSON-RPC is not configured. Set BDS_MCP_POWERLOOM_RPC_URL "
-                "on the MCP server."
-            ),
+            "error": "Powerloom JSON-RPC is not configured on this server. Set BDS_MCP_POWERLOOM_RPC_URL.",
         }
     cid = arguments.get("cid")
     epoch_id = arguments.get("epoch_id")

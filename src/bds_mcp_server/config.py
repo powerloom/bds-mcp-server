@@ -19,7 +19,13 @@ class Settings(BaseSettings):
     catalog_url: str | None = Field(default=None, description="HTTP URL to endpoints.json")
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8808)
-    powerloom_rpc_url: str | None = Field(default=None, description="Powerloom chain JSON-RPC for verify_data_provenance")
+    powerloom_rpc_url: str | None = Field(
+        default=None,
+        description=(
+            "Server-only Powerloom JSON-RPC for verify_data_provenance (eth_call). "
+            "Never returned in MCP tool output."
+        ),
+    )
     protocol_state_address: str = Field(
         default="0x1d0e010Ff11b781CA1dE34BD25a0037203e25E2a",
     )

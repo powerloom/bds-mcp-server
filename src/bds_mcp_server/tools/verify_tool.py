@@ -47,6 +47,7 @@ async def verify_data_provenance(
 ) -> dict[str, Any]:
     """
     Compare ``cid`` to on-chain ``maxSnapshotsCid`` via ProtocolState ``eth_call``.
+    Never includes ``rpc_url`` in the returned dict (callers must not leak it to clients).
     """
     dm = (data_market_override or data_market_address).strip()
     ps = protocol_state_address.strip()
@@ -59,10 +60,20 @@ async def verify_data_provenance(
         "params": [{"to": to_addr, "data": "0x" + calldata.hex()}, "latest"],
     }
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(rpc_url, json=req)
-        resp.raise_for_status()
-        body = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(rpc_url, json=req)
+            resp.raise_for_status()
+            body = resp.json()
+    except httpx.HTTPStatusError as e:
+        return {
+            "verified": False,
+            "error": f"RPC returned HTTP {e.response.status_code}",
+        }
+    except httpx.RequestError:
+        return {"verified": False, "error": "RPC request failed (connection or timeout)"}
+    except ValueError:
+        return {"verified": False, "error": "RPC response was not valid JSON"}
 
     if not isinstance(body, dict):
         return {"error": "RPC response is not an object", "verified": False}

@@ -78,7 +78,7 @@ All settings use the **`BDS_MCP_`** prefix. Copy **`.env.example`** to **`.env`*
 | `BDS_MCP_HOST` | no | `0.0.0.0` | Bind address for **this** MCP server |
 | `BDS_MCP_PORT` | no | `8808` | Listen port (`/sse`, `/messages/`, `/health`) |
 | `BDS_MCP_CATALOG_PATH_PREFIXES` | no | `/mpp` | Comma-separated path prefixes to **filter** catalog routes; use `all` to disable filtering |
-| `BDS_MCP_POWERLOOM_RPC_URL` | no | — | JSON-RPC URL for **`verify_data_provenance`** (`eth_call`) |
+| `BDS_MCP_POWERLOOM_RPC_URL` | no | — | **Server-only** JSON-RPC for **`verify_data_provenance`** — this process POSTs `eth_call` here. Use your private/internal URL (including `/v1/…` if required). The URL is **never** included in tool responses or error text. Agents obtain a public RPC from **`GET /credits/plans`** (`chains[].rpc_url` when **`public_rpc_url`** is set in metering payment-chain config), or from docs / their own env. |
 | `BDS_MCP_PROTOCOL_STATE_ADDRESS` | no | mainnet BDS default | ProtocolState contract |
 | `BDS_MCP_DATA_MARKET_ADDRESS` | no | mainnet BDS default | DataMarket contract |
 | `BDS_MCP_AUTH_CACHE_TTL_SECONDS` | no | `60` | Cache successful metering checks (seconds) |
@@ -153,7 +153,7 @@ One MCP tool per filtered **`endpoints.json`** route, same naming as local MCP: 
 ### `verify_data_provenance` (fixed)
 
 Parameters: **`cid`**, **`epoch_id`**, **`project_id`**, optional **`data_market`**.  
-Requires **`BDS_MCP_POWERLOOM_RPC_URL`** and correct ProtocolState/DataMarket config. If RPC is not set, the tool returns a clear configuration error.
+**Server** uses **`BDS_MCP_POWERLOOM_RPC_URL`** for `eth_call` only; the configured URL is never included in success or error payloads. If it is not set, the tool returns a configuration error. For client-side JSON-RPC, use metering **`GET /credits/plans`** or your own env. ProtocolState/DataMarket env must match the chain.
 
 ### `get_credit_balance` (fixed)
 
@@ -224,7 +224,7 @@ Ensure `.env` sets **`BDS_MCP_BASE_URL`**, **`BDS_MCP_METERING_URL`**, and **`BD
 | **401** on `/sse` or `/messages/` | Missing/wrong **`Authorization: Bearer`**, or metering rejects the key |
 | **502** (or older builds: **500**) on `/sse` / POST during auth | Metering **`GET /credits/balance`** failed (timeout, TLS, or **`Name or service not known`**). **`BDS_MCP_METERING_URL`** must be a hostname the **MCP container/VM** can resolve (public URL or correct cluster DNS)—not a name that only resolves on a developer machine. Current server code returns **502** with a JSON error body instead of an unhandled **500**. |
 | **402** or “balance zero” | Add credits in metering; key is valid but not billable |
-| **`verify_data_provenance` errors** | Set **`BDS_MCP_POWERLOOM_RPC_URL`**; verify ProtocolState/DataMarket addresses match the chain |
+| **`verify_data_provenance` errors** | Set **`BDS_MCP_POWERLOOM_RPC_URL`**; match ProtocolState/DataMarket to the chain. For client-side RPC, use metering **`GET /credits/plans`** or your own env — not MCP. |
 | Catalog tools return HTTP errors from core | **`BDS_MCP_BASE_URL`** wrong, or key lacks access; check Core API logs |
 
 ---
